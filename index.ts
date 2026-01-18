@@ -184,7 +184,7 @@ class ThoughtLoopDetector {
 
 
 
-export const TestPlugin: Plugin = async ({ project, client, $, directory, worktree }) => {
+export const ThoughtLoopDetectorPlugin: Plugin = async ({ project, client, $, directory, worktree }) => {
         const detector = new ThoughtLoopDetector(client);
         return {
                 event: async ({ event }) => {
