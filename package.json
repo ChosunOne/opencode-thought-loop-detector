@@ -1,0 +1,17 @@
+{
+  "name": "opencode-plugin-test",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@opencode-ai/plugin": "^1.1.25",
+    "@opencode-ai/sdk": "^1.1.25",
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "fastest-levenshtein": "^1.0.16"
+  }
+}
