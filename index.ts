@@ -142,23 +142,28 @@ class ThoughtLoopDetector {
                 }
                 sessionState?.updateDelta(event.properties.delta);
                 const similarity = sessionState?.getMinSimilarity();
-                await this.debug(`similarity: ${similarity}`);
+                this.debug(`similarity: ${similarity}`);
                 if (sessionState?.detectThoughtLoop(similarity)) {
-                        await this.warn("Thought loop detected", { reasoningHistory: sessionState.reasoningHistory });
-                        const promptRes = await this.client.session.prompt({
+                        // Critical Section start, do not await inside here
+                        const promptPromise = this.client.session.prompt({
                                 path: { id: session.id }, body: {
                                         messageID: event.properties.part.messageID,
                                         parts: [{ id: event.properties.part.id, synthetic: true, text: "⚠️Thought loop detected. The system has terminated this line of thinking as it is making no progress.", type: "text" }],
                                         noReply: false,
                                 },
                         });
+                        const abortPromise = this.client.session.abort({ path: { id: session.id } })
+                        // Critical section end
+                        await this.warn("Thought loop detected", { reasoningHistory: sessionState.reasoningHistory });
+                        const promptRes = await promptPromise;
+                        const abortRes = await abortPromise;
+
                         if (promptRes.error !== undefined) {
                                 await this.error("failed to inject prompt", promptRes.error);
                                 return;
                         }
                         sessionState.abortMessageID = promptRes.data.info.id;
                         await this.debug("successfully injected prompt");
-                        const abortRes = await this.client.session.abort({ path: { id: session.id } })
                         if (abortRes.error !== undefined) {
                                 await this.error(`failed to abort session: ${JSON.stringify(abortRes.error)}`, abortRes.error);
                                 return;
