@@ -3,7 +3,7 @@ import type { OpencodeClient, EventMessagePartUpdated, EventSessionCreated, Even
 import { distance } from "fastest-levenshtein";
 
 const MAX_REASONING_TRACE_LEN: number = 300;
-const MAX_REASONING_HISTORY_SEGMENTS: number = 10;
+const MAX_REASONING_HISTORY_SEGMENTS: number = 20;
 const MIN_LEVENSHTEIN_DISTANCE: number = 30;
 
 class SessionState {
