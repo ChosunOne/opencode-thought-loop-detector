@@ -8,6 +8,7 @@ const MIN_LEVENSHTEIN_DISTANCE: number = 30;
 
 class SessionState {
         public reasoningHistory: string[];
+        public abortMessageID?: string;
         constructor(public session: Session) {
                 this.reasoningHistory = [];
         }
@@ -40,13 +41,34 @@ class SessionState {
                 }
         }
 
-        public detectThoughtLoop() {
+        public getMinSimilarity() {
+                const lastTrace = this.reasoningHistory.at(-1);
+                if (lastTrace === undefined) {
+                        return 0;
+                }
+
+                let minDistance = 1000000000;
+                for (const trace of this.reasoningHistory.slice(0, this.reasoningHistory.length - 1)) {
+                        const lDistance = distance(lastTrace, trace);
+                        if (lDistance < minDistance) {
+                                minDistance = lDistance
+                        }
+                }
+
+                return minDistance;
+        }
+
+        public detectThoughtLoop(minSimilarity?: number) {
                 if (this.reasoningHistory.length < MAX_REASONING_HISTORY_SEGMENTS) {
                         return false;
                 }
                 const lastTrace = this.reasoningHistory.at(-1);
                 if (lastTrace === undefined) {
                         return false;
+                }
+
+                if (minSimilarity !== undefined) {
+                        return minSimilarity < MIN_LEVENSHTEIN_DISTANCE;
                 }
 
                 for (const trace of this.reasoningHistory.slice(0, this.reasoningHistory.length - 1)) {
@@ -103,10 +125,6 @@ class ThoughtLoopDetector {
                 }
 
 
-                if (event.properties.part.messageID === "msg_SYSTEMABORT") {
-                        await this.debug("successfully detected system abort");
-                        return;
-                }
 
                 const session = await this.getSessionFromMessage(event);
                 if (session === undefined) {
@@ -116,9 +134,21 @@ class ThoughtLoopDetector {
                 await this.debug(`delta: ${JSON.stringify(event.properties)}`);
                 await this.debug(`delta: ${event.properties.delta}`);
 
-                const sessionState = this.sessions.get(session.id);
+                let sessionState = this.sessions.get(session.id);
+                if (sessionState === undefined) {
+                        this.sessions.set(session.id, new SessionState(session));
+                        sessionState = this.sessions.get(session.id);
+                }
+
+                if (event.properties.part.messageID === sessionState?.abortMessageID) {
+                        sessionState.abortMessageID = undefined;
+                        await this.debug("successfully detected system abort");
+                        return;
+                }
                 sessionState?.updateDelta(event.properties.delta);
-                if (sessionState?.detectThoughtLoop()) {
+                const similarity = sessionState?.getMinSimilarity();
+                await this.debug(`similarity: ${similarity}`);
+                if (sessionState?.detectThoughtLoop(similarity)) {
                         await this.warn("Thought loop detected", { reasoningHistory: sessionState.reasoningHistory });
                         const promptRes = await this.client.session.prompt({
                                 path: { id: session.id }, body: {
