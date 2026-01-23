@@ -124,15 +124,10 @@ class ThoughtLoopDetector {
                         return;
                 }
 
-
-
                 const session = await this.getSessionFromMessage(event);
                 if (session === undefined) {
                         return;
                 }
-
-                await this.debug(`delta: ${JSON.stringify(event.properties)}`);
-                await this.debug(`delta: ${event.properties.delta}`);
 
                 let sessionState = this.sessions.get(session.id);
                 if (sessionState === undefined) {
@@ -152,21 +147,26 @@ class ThoughtLoopDetector {
                         await this.warn("Thought loop detected", { reasoningHistory: sessionState.reasoningHistory });
                         const promptRes = await this.client.session.prompt({
                                 path: { id: session.id }, body: {
-                                        messageID: "msg_SYSTEMABORT",
-                                        parts: [{ text: "⚠️Thought loop detected. The system has terminated this line of thinking as it is making no progress.", type: "text" }],
-                                        noReply: true,
+                                        messageID: event.properties.part.messageID,
+                                        parts: [{ id: event.properties.part.id, synthetic: true, text: "⚠️Thought loop detected. The system has terminated this line of thinking as it is making no progress.", type: "text" }],
+                                        noReply: false,
                                 },
                         });
                         if (promptRes.error !== undefined) {
                                 await this.error("failed to inject prompt", promptRes.error);
                                 return;
                         }
+                        sessionState.abortMessageID = promptRes.data.info.id;
                         await this.debug("successfully injected prompt");
                         const abortRes = await this.client.session.abort({ path: { id: session.id } })
                         if (abortRes.error !== undefined) {
-                                await this.error(`failed to abort session: ${JSON.stringify(abortRes.error)}`), abortRes.error;
+                                await this.error(`failed to abort session: ${JSON.stringify(abortRes.error)}`, abortRes.error);
                                 return;
 
+                        }
+                        if (abortRes.data !== true) {
+                                await this.error(`failed to abort session: ${JSON.stringify(abortRes.data)}`);
+                                return;
                         }
                         await this.debug("successfully aborted session");
                         sessionState.reasoningHistory = [];
