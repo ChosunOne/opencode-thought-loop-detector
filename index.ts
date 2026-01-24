@@ -9,6 +9,7 @@ const MIN_LEVENSHTEIN_DISTANCE: number = 30;
 class SessionState {
         public reasoningHistory: string[];
         public abortMessageID?: string;
+        public pendingAbort: boolean = false;
         constructor() {
                 this.reasoningHistory = [];
         }
@@ -107,7 +108,7 @@ class ThoughtLoopDetector {
 
         private async handleSessionCreated(event: EventSessionCreated) {
                 if (!this.sessions.has(event.properties.info.id)) {
-                        this.sessions.set(event.properties.info.id, new SessionState(event.properties.info));
+                        this.sessions.set(event.properties.info.id, new SessionState());
                         this.debug(`Session state created for session ${event.properties.info.id}`);
                 }
         }
@@ -120,6 +121,7 @@ class ThoughtLoopDetector {
         }
 
         private async handleMessagePartUpdate(event: EventMessagePartUpdated) {
+                // Critical Section start, do not await inside here
                 if (event.properties.part.type !== "reasoning") {
                         return;
                 }
@@ -127,20 +129,26 @@ class ThoughtLoopDetector {
                 const sessionID = event.properties.part.sessionID;
                 let sessionState = this.sessions.get(sessionID);
                 if (sessionState === undefined) {
-                        this.sessions.set(sessionID, new SessionState());
-                        sessionState = this.sessions.get(sessionID);
+                        sessionState = new SessionState();
+                        this.sessions.set(sessionID, sessionState);
                 }
 
-                if (event.properties.part.messageID === sessionState?.abortMessageID) {
+                if (event.properties.part.messageID === sessionState.abortMessageID) {
                         sessionState.abortMessageID = undefined;
+                        sessionState.pendingAbort = false;
                         this.debug("successfully detected system abort");
                         return;
                 }
-                // Critical Section start, do not await inside here
-                sessionState?.updateDelta(event.properties.delta);
+
+                if (sessionState.pendingAbort) {
+                        this.debug("pending session abort");
+                        return;
+                }
+                sessionState.updateDelta(event.properties.delta);
                 const similarity = sessionState?.getMinSimilarity();
                 this.debug(`similarity: ${similarity}`);
-                if (sessionState?.detectThoughtLoop(similarity)) {
+                if (sessionState.detectThoughtLoop(similarity)) {
+                        sessionState.pendingAbort = true;
                         const abortPromise = this.client.session.abort({ path: { id: sessionID } })
                         const promptPromise = this.client.session.prompt({
                                 path: { id: sessionID }, body: {
