@@ -9,7 +9,7 @@ const MIN_LEVENSHTEIN_DISTANCE: number = 30;
 class SessionState {
         public reasoningHistory: string[];
         public abortMessageID?: string;
-        constructor(public session: Session) {
+        constructor() {
                 this.reasoningHistory = [];
         }
 
@@ -124,37 +124,34 @@ class ThoughtLoopDetector {
                         return;
                 }
 
-                const session = await this.getSessionFromMessage(event);
-                if (session === undefined) {
-                        return;
-                }
-
-                let sessionState = this.sessions.get(session.id);
+                const sessionID = event.properties.part.sessionID;
+                let sessionState = this.sessions.get(sessionID);
                 if (sessionState === undefined) {
-                        this.sessions.set(session.id, new SessionState(session));
-                        sessionState = this.sessions.get(session.id);
+                        this.sessions.set(sessionID, new SessionState());
+                        sessionState = this.sessions.get(sessionID);
                 }
 
                 if (event.properties.part.messageID === sessionState?.abortMessageID) {
                         sessionState.abortMessageID = undefined;
-                        await this.debug("successfully detected system abort");
+                        this.debug("successfully detected system abort");
                         return;
                 }
+                // Critical Section start, do not await inside here
                 sessionState?.updateDelta(event.properties.delta);
                 const similarity = sessionState?.getMinSimilarity();
                 this.debug(`similarity: ${similarity}`);
                 if (sessionState?.detectThoughtLoop(similarity)) {
-                        // Critical Section start, do not await inside here
                         const promptPromise = this.client.session.prompt({
-                                path: { id: session.id }, body: {
+                                path: { id: sessionID }, body: {
                                         messageID: event.properties.part.messageID,
                                         parts: [{ id: event.properties.part.id, synthetic: true, text: "⚠️Thought loop detected. The system has terminated this line of thinking as it is making no progress.", type: "text" }],
                                         noReply: false,
                                 },
                         });
-                        const abortPromise = this.client.session.abort({ path: { id: session.id } })
-                        // Critical section end
+                        const abortPromise = this.client.session.abort({ path: { id: sessionID } })
+                        sessionState.reasoningHistory = [];
                         await this.warn("Thought loop detected", { reasoningHistory: sessionState.reasoningHistory });
+                        // Critical section end
                         const promptRes = await promptPromise;
                         const abortRes = await abortPromise;
 
@@ -174,19 +171,7 @@ class ThoughtLoopDetector {
                                 return;
                         }
                         await this.debug("successfully aborted session");
-                        sessionState.reasoningHistory = [];
                 }
-        }
-
-        private async getSessionFromMessage(event: EventMessagePartUpdated) {
-                const sessionRes = await this.client.session.get({ path: { id: event.properties.part.sessionID } });
-                if (sessionRes.error !== undefined) {
-                        await this.error(`Failed to get session ${JSON.stringify(sessionRes.error)}`);
-                        return;
-                }
-                const session = sessionRes.data;
-                await this.debug(`Got session ${session?.id}`);
-                return session;
         }
 
         private async log(level: "debug" | "info" | "warn" | "error", message: string, extra?: { [key: string]: unknown }) {
