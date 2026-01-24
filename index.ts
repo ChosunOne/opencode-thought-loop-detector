@@ -141,6 +141,7 @@ class ThoughtLoopDetector {
                 const similarity = sessionState?.getMinSimilarity();
                 this.debug(`similarity: ${similarity}`);
                 if (sessionState?.detectThoughtLoop(similarity)) {
+                        const abortPromise = this.client.session.abort({ path: { id: sessionID } })
                         const promptPromise = this.client.session.prompt({
                                 path: { id: sessionID }, body: {
                                         messageID: event.properties.part.messageID,
@@ -148,12 +149,11 @@ class ThoughtLoopDetector {
                                         noReply: false,
                                 },
                         });
-                        const abortPromise = this.client.session.abort({ path: { id: sessionID } })
                         sessionState.reasoningHistory = [];
-                        await this.warn("Thought loop detected", { reasoningHistory: sessionState.reasoningHistory });
                         // Critical section end
                         const promptRes = await promptPromise;
                         const abortRes = await abortPromise;
+                        await this.warn("Thought loop detected", { reasoningHistory: sessionState.reasoningHistory });
 
                         if (promptRes.error !== undefined) {
                                 await this.error("failed to inject prompt", promptRes.error);
