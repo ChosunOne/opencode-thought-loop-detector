@@ -121,7 +121,6 @@ class ThoughtLoopDetector {
         }
 
         private async handleMessagePartUpdate(event: EventMessagePartUpdated) {
-                // Critical Section start, do not await inside here
                 if (event.properties.part.type !== "reasoning") {
                         return;
                 }
@@ -158,27 +157,28 @@ class ThoughtLoopDetector {
                                 },
                         });
                         sessionState.reasoningHistory = [];
-                        // Critical section end
-                        const promptRes = await promptPromise;
-                        const abortRes = await abortPromise;
-                        await this.warn("Thought loop detected", { reasoningHistory: sessionState.reasoningHistory });
+                        abortPromise.then((abortRes) => {
+                                if (abortRes.error !== undefined) {
+                                        this.error(`failed to abort session: ${JSON.stringify(abortRes.error)}`, abortRes.error);
+                                        return;
+                                }
+                                if (abortRes.data !== true) {
+                                        this.error(`failed to abort session: ${JSON.stringify(abortRes.data)}`);
+                                        return;
+                                }
+                                sessionState.pendingAbort = false;
+                                this.debug("successfully aborted session");
+                        });
+                        promptPromise.then((promptRes) => {
+                                this.warn("Thought loop detected", { reasoningHistory: sessionState.reasoningHistory });
 
-                        if (promptRes.error !== undefined) {
-                                await this.error("failed to inject prompt", promptRes.error);
-                                return;
-                        }
-                        sessionState.abortMessageID = promptRes.data.info.id;
-                        await this.debug("successfully injected prompt");
-                        if (abortRes.error !== undefined) {
-                                await this.error(`failed to abort session: ${JSON.stringify(abortRes.error)}`, abortRes.error);
-                                return;
-
-                        }
-                        if (abortRes.data !== true) {
-                                await this.error(`failed to abort session: ${JSON.stringify(abortRes.data)}`);
-                                return;
-                        }
-                        await this.debug("successfully aborted session");
+                                if (promptRes.error !== undefined) {
+                                        this.error("failed to inject prompt", promptRes.error);
+                                        return;
+                                }
+                                sessionState.abortMessageID = promptRes.data.info.id;
+                                this.debug("successfully injected prompt");
+                        });
                 }
         }
 
